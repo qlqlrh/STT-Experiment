@@ -1,0 +1,45 @@
+# Node
+node_modules/
+.next/
+.out/
+.env.local
+.env
+.env.*.local
+
+# Frontend build artifacts
+frontend/.next/
+frontend/.vercel/
+frontend/out/
+
+# MacOS
+.DS_Store
+
+# Java/Gradle
+backend/build/
+backend/out/
+backend/.gradle/
+backend/*.log
+backend/.idea/
+backend/.classpath
+backend/.project
+backend/.settings/
+
+# Logs
+logs/
+*.log
+
+# Credentials / secrets
+backend/src/main/resources/stt-credentials.json
+**/*credentials*.json
+**/*.pem
+**/*.key
+**/*.p12
+**/*.keystore
+**/*.jks
+**/*service-account*.json
+
+# Misc
+.vercel
+.vscode/
+.idea/
+*.iml
