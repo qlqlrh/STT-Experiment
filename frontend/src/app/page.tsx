@@ -24,6 +24,7 @@ export default function Home() {
   const [audioDurationMs, setAudioDurationMs] = useState<number | null>(null);
   const [lastKpiMetrics, setLastKpiMetrics] = useState<KpiMetrics | null>(null);
   const [lastKpiResult, setLastKpiResult] = useState<KpiResult | null>(null);
+  const savedRunIdsRef = React.useRef<Set<string>>(new Set());
 
   const metrics = useMemo<Metrics>(() => {
     const e2eArr = recent.map((s) => s.e2e);
@@ -40,21 +41,22 @@ export default function Home() {
   }, [recent]);
 
   const { kpiMetrics, kpiResult } = useMemo((): { kpiMetrics: KpiMetrics | null; kpiResult: KpiResult | null } => {
-    if (!audioDurationMs || recent.length === 0) return { kpiMetrics: null, kpiResult: null };
+    if (!audioDurationMs) return { kpiMetrics: null, kpiResult: null };
+    const seg = recent[0] || current;
+    if (!seg || typeof seg.e2e !== 'number') return { kpiMetrics: null, kpiResult: null };
     const dur = audioDurationMs;
-    const aslEach = recent.map((s) => (s.e2e ?? 0) - dur);
-    const aslPercentEach = recent.map((s) => (((s.e2e ?? 0) - dur) / Math.max(1, dur)) * 100);
-    const rtfEach = recent.map((s) => (s.e2e ?? 0) / Math.max(1, dur));
-    const ttftEach = recent.map((s) => ((s.t2 ?? 0) - (s.t1 ?? 0)) + (s.tx ?? 0));
-
+    const asl = (seg.e2e - dur) / 1000;
+    const aslPercent = ((seg.e2e - dur) / Math.max(1, dur)) * 100;
+    const rtfVal = seg.e2e / Math.max(1, dur);
+    const ttftVal = (((seg.t2 ?? 0) - (seg.t1 ?? 0)) + (seg.tx ?? 0)) / 1000;
     const k: KpiMetrics = {
-      asl: { mean: mean(aslEach) / 1000, p95: p95(aslEach) / 1000 }, // to seconds
-      aslPercent: { mean: mean(aslPercentEach), p95: p95(aslPercentEach) },
-      rtf: { mean: mean(rtfEach), p95: p95(rtfEach) },
-      ttft: { p95: p95(ttftEach) / 1000 }, // to seconds
+      asl: { mean: asl, p95: asl },
+      aslPercent: { mean: aslPercent, p95: aslPercent },
+      rtf: { mean: rtfVal, p95: rtfVal },
+      ttft: { p95: Number.isFinite(ttftVal) && ttftVal >= 0 ? ttftVal : 0 },
     };
     return { kpiMetrics: k, kpiResult: evaluateKpi(k) };
-  }, [audioDurationMs, recent]);
+  }, [audioDurationMs, recent, current]);
 
   // Live에서 계산된 최신 KPI 스냅샷 보관 (Run 저장 시 그대로 사용)
   React.useEffect(() => {
@@ -73,7 +75,6 @@ export default function Home() {
 
   async function onStart(s: Scenario, file: File) {
     setScenario(s);
-    setActiveTab("Live");
     setCurrent(null);
     setRecent([]);
     // 오디오 길이(ms) 계산 (가변 길이 보정용)
@@ -111,11 +112,12 @@ export default function Home() {
             t3: seg.t3 ?? prev?.t3 ?? 0,
             t4: seg.t4 ?? prev?.t4 ?? 0,
             t5: seg.t5 ?? prev?.t5 ?? 0,
-            e2e: seg.e2e ?? prev?.e2e ?? 0,
-            stt: seg.stt ?? prev?.stt ?? 0,
-            tx: seg.tx ?? prev?.tx ?? 0,
-            ui: seg.ui ?? prev?.ui ?? 0,
+            e2e: seg.e2e ?? prev?.e2e,
+            stt: seg.stt ?? prev?.stt,
+            tx: seg.tx ?? prev?.tx,
+            ui: seg.ui ?? prev?.ui,
             transcript: seg.transcript ?? prev?.transcript,
+            droppedFrames: seg.dropRate !== undefined ? Math.round((seg.dropRate || 0) * 1000) : prev?.droppedFrames,
             t1Epoch: seg.t1Epoch ?? prev?.t1Epoch,
             t2Epoch: seg.t2Epoch ?? prev?.t2Epoch,
             t3Epoch: seg.t3Epoch ?? prev?.t3Epoch,
@@ -136,6 +138,7 @@ export default function Home() {
                 t3: seg.t3 ?? (current as any)?.t3 ?? seg.t2 ?? seg.t1!,
                 t4: seg.t4 ?? (current as any)?.t4 ?? seg.t3 ?? seg.t2 ?? seg.t1!,
                 t5: seg.t5!,
+                droppedFrames: seg.dropRate !== undefined ? Math.round((seg.dropRate || 0) * 1000) : (current as any)?.droppedFrames,
                 t1Epoch: seg.t1Epoch ?? (current as any)?.t1Epoch,
                 t2Epoch: seg.t2Epoch ?? (current as any)?.t2Epoch,
                 t3Epoch: seg.t3Epoch ?? (current as any)?.t3Epoch,
@@ -144,30 +147,48 @@ export default function Home() {
               },
               ...r,
             ].slice(0, 200));
+
+            // Live에 결과가 뜨는 즉시 Run에도 1회 결과를 기록 (중복 방지)
+            if (!savedRunIdsRef.current.has(segmentId) && audioDurationMs) {
+              const segForRun = {
+                id: segmentId,
+                e2e: seg.e2e!,
+                stt: seg.stt ?? 0,
+                tx: seg.tx ?? 0,
+                ui: seg.ui ?? 0,
+                t1: seg.t1!,
+                t2: seg.t2 ?? seg.t1!,
+                t3: seg.t3 ?? seg.t2 ?? seg.t1!,
+                t4: seg.t4 ?? seg.t3 ?? seg.t2 ?? seg.t1!,
+                t5: seg.t5!,
+              } as Segment;
+
+              const singleMetrics: Metrics = {
+                n: 1,
+                e2e: { mean: segForRun.e2e, p95: segForRun.e2e, std: 0 } as any,
+                stt: { mean: segForRun.stt, p95: segForRun.stt } as any,
+                tx: { mean: segForRun.tx, p95: segForRun.tx } as any,
+                ui: { mean: segForRun.ui, p95: segForRun.ui } as any,
+                dropRate: typeof seg.dropRate === 'number' ? seg.dropRate : undefined,
+              } as any;
+
+              const dur = audioDurationMs;
+              const asl = (segForRun.e2e - dur) / 1000;
+              const aslPercent = ((segForRun.e2e - dur) / Math.max(1, dur)) * 100;
+              const rtfVal = segForRun.e2e / Math.max(1, dur);
+              const ttftVal = (((segForRun.t2 ?? 0) - (segForRun.t1 ?? 0)) + (segForRun.tx ?? 0)) / 1000;
+              const kpiM: KpiMetrics = { asl: { mean: asl, p95: asl }, aslPercent: { mean: aslPercent, p95: aslPercent }, rtf: { mean: rtfVal, p95: rtfVal }, ttft: { p95: ttftVal } };
+              const kpiR: KpiResult = evaluateKpi(kpiM);
+
+              const runId = `${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
+              const status = kpiR.overall === 'PASS' ? 'pass' : kpiR.overall === 'WARN' ? 'warn' : 'fail';
+              const run: Run = { id: runId, startedAt: Date.now(), scenario: s as Scenario, metrics: singleMetrics, status, segments: [segForRun], kpiMetrics: kpiM, kpiResult: kpiR };
+              setRuns((prev) => [run, ...prev]);
+              savedRunIdsRef.current.add(segmentId);
+            }
           }
         },
-        onCompleted: () => {
-          // 실험 1회 종료 시, Live에서 계산된 KPI 스냅샷을 그대로 저장
-          if (!scenario) return;
-          const runId = `${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
-          const res = lastKpiResult ?? undefined;
-          const status = res ? (res.overall === 'PASS' ? 'pass' : res.overall === 'WARN' ? 'warn' : 'fail') : 'fail';
-          const dropRate = ((): number | undefined => {
-            // 추후 서버에서 드롭 통계가 오면 교체. 지금은 없으면 0으로 저장
-            return 0;
-          })();
-          const run: Run = {
-            id: runId,
-            startedAt: Date.now(),
-            scenario,
-            metrics: { ...metrics, dropRate },
-            status,
-            segments: recent,
-            kpiMetrics: lastKpiMetrics ?? undefined,
-            kpiResult: res,
-          };
-          setRuns((prev) => [run, ...prev]);
-        },
+        onCompleted: () => {},
         onError: (e) => {
           console.error(e);
         },
@@ -191,7 +212,7 @@ export default function Home() {
         <ParamsPanel defaultScenario={{}} onStart={onStart} />
       </aside>
       <main className="flex flex-col min-w-0">
-        <HeaderKpiBar scenario={scenario!} kpiStatus={kpiStatus} kpiText={kpiText} />
+        <HeaderKpiBar scenario={scenario} kpiStatus={kpiStatus} kpiText={kpiText} />
         <Tabs tabs={["Live","Summary","Distributions","Runs","Logs"]} active={activeTab} onChange={setActiveTab}>
           {activeTab === "Live" && <LivePane current={current} recent={recent} kpiMetrics={kpiMetrics ?? undefined} kpiResult={kpiResult ?? undefined} />}
           {activeTab === "Summary" && scenario && <SummaryPane scenario={scenario} metrics={metrics} kpiMetrics={kpiMetrics ?? undefined} kpiResult={kpiResult ?? undefined} />}

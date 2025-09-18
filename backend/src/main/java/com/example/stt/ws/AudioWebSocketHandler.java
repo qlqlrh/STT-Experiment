@@ -69,10 +69,13 @@ public class AudioWebSocketHandler extends TextWebSocketHandler {
                                 long t4 = System.nanoTime() / 1_000_000;
                                 long epoch = System.currentTimeMillis();
                                 try {
+                                    SessionCtx ctx = sessions.get(session.getId());
+                                    double dropRate = (ctx != null) ? ctx.getDropRate() : 0.0;
                                     String msg = mapper.createObjectNode()
                                             .put("type", "SVR_T4_FINAL")
                                             .put("t4_ms", t4)
                                             .put("server_epoch_ms", epoch)
+                                            .put("drop_rate", dropRate)
                                             .put("transcript", transcript)
                                             .toString();
                                     session.sendMessage(new TextMessage(msg));

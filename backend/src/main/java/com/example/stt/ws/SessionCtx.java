@@ -4,6 +4,7 @@ import com.example.stt.stt.GoogleSpeechService;
 
 import java.util.ArrayDeque;
 import java.util.Queue;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -20,6 +21,9 @@ public class SessionCtx {
     private final Queue<byte[]> unboundedQueue;
     private final ArrayBlockingQueue<byte[]> boundedQueue;
 
+    private final AtomicLong totalReceived = new AtomicLong(0);
+    private final AtomicLong totalDropped = new AtomicLong(0);
+
     public volatile Long t3Millis = null;
     public volatile boolean firstChunkPushed = false;
 
@@ -34,10 +38,25 @@ public class SessionCtx {
     }
 
     public void enqueue(byte[] data) {
+        totalReceived.incrementAndGet();
         switch (bufferPolicy) {
             case UNBOUNDED -> { synchronized (unboundedQueue) { unboundedQueue.add(data); unboundedQueue.notifyAll(); } }
-            case BOUNDED_DROP_NEWEST -> { if (!boundedQueue.offer(data)) { /* drop newest */ } }
-            case BOUNDED_DROP_OLDEST -> { if (!boundedQueue.offer(data)) { boundedQueue.poll(); boundedQueue.offer(data); } }
+            case BOUNDED_DROP_NEWEST -> {
+                if (!boundedQueue.offer(data)) {
+                    // drop newest
+                    totalDropped.incrementAndGet();
+                }
+            }
+            case BOUNDED_DROP_OLDEST -> {
+                if (!boundedQueue.offer(data)) {
+                    // drop oldest (one frame removed)
+                    byte[] removed = boundedQueue.poll();
+                    if (removed != null) {
+                        totalDropped.incrementAndGet();
+                    }
+                    boundedQueue.offer(data);
+                }
+            }
         }
     }
 
@@ -51,6 +70,14 @@ public class SessionCtx {
     public void shutdown() {
         workerPool.shutdownNow();
         streamingSession.finishStreaming();
+    }
+
+    public long getTotalReceived() { return totalReceived.get(); }
+    public long getTotalDropped() { return totalDropped.get(); }
+    public double getDropRate() {
+        long r = totalReceived.get();
+        if (r <= 0) return 0.0;
+        return (double) totalDropped.get() / (double) r;
     }
 }
 

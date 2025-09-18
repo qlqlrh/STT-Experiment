@@ -1,5 +1,15 @@
 export type StartCallbacks = {
-  onSegmentUpdate: (seg: { id: string; t1: number; t2?: number; t3?: number; t4?: number; t5?: number; e2e?: number; stt?: number; tx?: number; ui?: number; transcript?: string }) => void;
+  onSegmentUpdate: (seg: {
+    id: string;
+    t1: number;
+    t2?: number; t3?: number; t4?: number; t5?: number;
+    e2e?: number; stt?: number; tx?: number; ui?: number;
+    transcript?: string;
+    // Optional epoch timestamps for UI display
+    t1Epoch?: number; t2Epoch?: number; t3Epoch?: number; t4Epoch?: number; t5Epoch?: number;
+    // Optional server-reported drop rate (0..1)
+    dropRate?: number;
+  }) => void;
   onCompleted: () => void;
   onError: (err: unknown) => void;
 };
@@ -113,7 +123,7 @@ export async function runExperiment(
       if (!firstSent) {
         firstSent = true;
         seg.t2 = performance.now();
-        cb.onSegmentUpdate({ id: seg.id, t2: seg.t2, t2Epoch: Date.now() });
+        cb.onSegmentUpdate({ id: seg.id, t1: seg.t1!, t2: seg.t2, t2Epoch: Date.now() });
       }
       if (params.pace === 'realtime') {
         const frameMs = (params.frame / 16000) * 1000;
@@ -133,19 +143,19 @@ export async function runExperiment(
         seg.t3 = msg.t3_ms;
         const t3Client = performance.now();
         const tx = seg.t2 ? t3Client - seg.t2 : undefined;
-        cb.onSegmentUpdate({ id: seg.id, t3: seg.t3, tx, t3Epoch: msg.server_epoch_ms ?? Date.now() });
+        cb.onSegmentUpdate({ id: seg.id, t1: seg.t1!, t3: seg.t3, tx, t3Epoch: msg.server_epoch_ms ?? Date.now() });
       } else if (msg.type === 'SVR_T4_FINAL') {
         seg.t4 = msg.t4_ms;
         t4ClientArrival = performance.now();
         const stt = seg.t3 && seg.t4 ? seg.t4 - seg.t3 : undefined;
         // Update immediately with T4 and STT
-        cb.onSegmentUpdate({ id: seg.id, t4: seg.t4, transcript: msg.transcript, t4Epoch: msg.server_epoch_ms ?? Date.now(), stt });
+        cb.onSegmentUpdate({ id: seg.id, t1: seg.t1!, t4: seg.t4, transcript: msg.transcript, t4Epoch: msg.server_epoch_ms ?? Date.now(), stt, dropRate: typeof msg.drop_rate === 'number' ? msg.drop_rate : undefined });
         // After the UI applies the transcript, capture T5 and compute E2E/UI
         requestAnimationFrame(() => {
           seg.t5 = performance.now();
           const e2e = seg.t1 && seg.t5 ? seg.t5 - seg.t1 : undefined;
           const ui = t4ClientArrival && seg.t5 ? seg.t5 - t4ClientArrival : undefined;
-          cb.onSegmentUpdate({ id: seg.id, t5: seg.t5, e2e, ui, t5Epoch: Date.now() });
+          cb.onSegmentUpdate({ id: seg.id, t1: seg.t1!, t5: seg.t5, e2e, ui, t5Epoch: Date.now(), dropRate: typeof msg.drop_rate === 'number' ? msg.drop_rate : undefined });
           cb.onCompleted();
         });
       }
