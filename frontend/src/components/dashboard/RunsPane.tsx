@@ -86,11 +86,11 @@ function badge(s: Run['status']) {
 function formatTtft(r: Run): string {
   const k = r.kpiMetrics;
   if (k && typeof k.ttft?.p95 === 'number') return Number(k.ttft.p95).toFixed(2);
-  // fallback: segments에서 TTFT 근사 (T2-T1 + tx)
+  // fallback: segments에서 TTFT 계산 (T4 - T1, 클라이언트 기준)
   const vals = (r.segments || [])
     .map((s) => {
-      const t2 = s.t2 ?? 0; const t1 = s.t1 ?? 0; const tx = s.tx ?? 0;
-      const v = (t2 - t1) + tx; // ms
+      const t4 = s.t4 ?? 0; const t1 = s.t1 ?? 0;
+      const v = t4 - t1; // ms, 클라이언트 시계 기준
       return Number.isFinite(v) && v >= 0 ? v : undefined;
     })
     .filter((v): v is number => typeof v === 'number');

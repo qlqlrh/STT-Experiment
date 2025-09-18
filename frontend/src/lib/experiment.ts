@@ -91,8 +91,19 @@ export async function runExperiment(
   const ws = new WebSocket(WS_URL);
   ws.binaryType = 'arraybuffer';
 
-  const seg = { id: params.segmentId, t1: performance.now(), t2: undefined as number|undefined, t3: undefined as number|undefined, t4: undefined as number|undefined, t5: undefined as number|undefined };
-  cb.onSegmentUpdate({ id: seg.id, t1: seg.t1, t1Epoch: Date.now() });
+  const seg = {
+    id: params.segmentId,
+    t1c: performance.now(), // T1c: 세그먼트 시작
+    t2c: undefined as number | undefined, // T2c: 첫 프레임 전송 직후
+    t4f_c: undefined as number | undefined, // T4f_c: final 결과 수신 시각
+    firstResult_c: undefined as number | undefined, // 첫 결과 시각 (final 기준)
+    t5c: undefined as number | undefined, // T5c: UI 반영 완료 직후
+    txPipe_ms: undefined as number | undefined, // 서버 델타 (S3-S2)
+    sttProc_ms: undefined as number | undefined, // 서버 델타 (S4f-S3)
+    rtf: undefined as number | undefined, // 서버 제공 RTF (선택)
+    completed: false as boolean, // 완료 가드
+  };
+  cb.onSegmentUpdate({ id: seg.id, t1: seg.t1c, t1Epoch: Date.now() });
 
   let t4ClientArrival: number | undefined;
   ws.onopen = () => {
@@ -122,8 +133,9 @@ export async function runExperiment(
       ws.send(buf);
       if (!firstSent) {
         firstSent = true;
-        seg.t2 = performance.now();
-        cb.onSegmentUpdate({ id: seg.id, t1: seg.t1!, t2: seg.t2, t2Epoch: Date.now() });
+        // ws.send() 호출이 성공적으로 반환된 직후에 T2c 기록
+        seg.t2c = performance.now(); // T2c: 첫 프레임 전송 직후
+        cb.onSegmentUpdate({ id: seg.id, t1: seg.t1c!, t2: seg.t2c, t2Epoch: Date.now() });
       }
       if (params.pace === 'realtime') {
         const frameMs = (params.frame / 16000) * 1000;
@@ -140,23 +152,49 @@ export async function runExperiment(
     try {
       const msg = JSON.parse(ev.data);
       if (msg.type === 'SVR_T3') {
-        seg.t3 = msg.t3_ms;
-        const t3Client = performance.now();
-        const tx = seg.t2 ? t3Client - seg.t2 : undefined;
-        cb.onSegmentUpdate({ id: seg.id, t1: seg.t1!, t3: seg.t3, tx, t3Epoch: msg.server_epoch_ms ?? Date.now() });
+        // 서버 델타만 반영 (절대시각으로 재구성 금지)
+        seg.txPipe_ms = typeof msg.txPipe_ms === 'number' ? msg.txPipe_ms : undefined;
+        cb.onSegmentUpdate({ id: seg.id, t1: seg.t1c!, tx: seg.txPipe_ms as any });
       } else if (msg.type === 'SVR_T4_FINAL') {
-        seg.t4 = msg.t4_ms;
-        t4ClientArrival = performance.now();
-        const stt = seg.t3 && seg.t4 ? seg.t4 - seg.t3 : undefined;
-        // Update immediately with T4 and STT
-        cb.onSegmentUpdate({ id: seg.id, t1: seg.t1!, t4: seg.t4, transcript: msg.transcript, t4Epoch: msg.server_epoch_ms ?? Date.now(), stt, dropRate: typeof msg.drop_rate === 'number' ? msg.drop_rate : undefined });
-        // After the UI applies the transcript, capture T5 and compute E2E/UI
+        // 서버에서 STT 처리 지연을 델타로 받음
+        seg.sttProc_ms = typeof msg.sttProc_ms === 'number' ? msg.sttProc_ms : undefined;
+        seg.rtf = typeof msg.rtf === 'number' ? msg.rtf : undefined;
+        seg.t4f_c = performance.now(); // T4f_c: final 결과 수신 시각
+        if (!seg.firstResult_c) seg.firstResult_c = seg.t4f_c;
+        
+        // Update immediately with T4(final) and STT
+        cb.onSegmentUpdate({
+          id: seg.id,
+          t1: seg.t1c!,
+          // t4는 final 수신 시각만 사용
+          t4: seg.t4f_c,
+          transcript: msg.transcript,
+          t4Epoch: Date.now(),
+          stt: seg.sttProc_ms as any,
+          dropRate: typeof msg.drop_rate === 'number' ? msg.drop_rate : undefined,
+        });
+        
+        // After the UI applies the transcript, capture T5 and compute E2E/UI/TTFT
         requestAnimationFrame(() => {
-          seg.t5 = performance.now();
-          const e2e = seg.t1 && seg.t5 ? seg.t5 - seg.t1 : undefined;
-          const ui = t4ClientArrival && seg.t5 ? seg.t5 - t4ClientArrival : undefined;
-          cb.onSegmentUpdate({ id: seg.id, t1: seg.t1!, t5: seg.t5, e2e, ui, t5Epoch: Date.now(), dropRate: typeof msg.drop_rate === 'number' ? msg.drop_rate : undefined });
-          cb.onCompleted();
+          requestAnimationFrame(() => {
+            if ((seg as any).completed) return;
+            seg.t5c = performance.now(); // T5c: UI 반영 완료 직후
+            const e2e = seg.t1c && seg.t5c ? seg.t5c - seg.t1c : undefined;
+            const ui = seg.t4f_c && seg.t5c ? seg.t5c - seg.t4f_c : undefined;
+            const ttft = seg.firstResult_c ? seg.firstResult_c - seg.t1c : undefined;
+            (seg as any).completed = true;
+            cb.onSegmentUpdate({
+              id: seg.id,
+              t1: seg.t1c!,
+              t4: seg.t4f_c,
+              t5: seg.t5c,
+              e2e,
+              ui,
+              t5Epoch: Date.now(),
+              dropRate: typeof msg.drop_rate === 'number' ? msg.drop_rate : undefined,
+            });
+            cb.onCompleted();
+          });
         });
       }
     } catch {}

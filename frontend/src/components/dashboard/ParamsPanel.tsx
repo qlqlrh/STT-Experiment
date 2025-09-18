@@ -6,11 +6,12 @@ import { listPresets, loadPreset, savePreset } from "@/utils/presets";
 type Props = {
   defaultScenario?: Partial<Scenario>;
   onStart: (s: Scenario, file: File) => void;
+  onStartBatch?: (file: File) => void;
   onSavePreset?: (name: string, s: Scenario) => void;
   onLoadPreset?: (name: string, s: Scenario) => void;
 };
 
-export default function ParamsPanel({ defaultScenario, onStart, onSavePreset, onLoadPreset }: Props) {
+export default function ParamsPanel({ defaultScenario, onStart, onStartBatch, onSavePreset, onLoadPreset }: Props) {
   const [file, setFile] = useState<File | null>(null);
   const [scenario, setScenario] = useState<Scenario>({
     frame: defaultScenario?.frame ?? 4096,
@@ -166,6 +167,11 @@ export default function ParamsPanel({ defaultScenario, onStart, onSavePreset, on
       </div>
       <div className="flex gap-2">
         <button className="px-3 py-2 rounded-md bg-indigo-600 text-white text-sm" onClick={start} title={!file ? 'Select an audio file first' : ''}>Start Experiment</button>
+        <button
+          className="px-3 py-2 rounded-md bg-emerald-600 text-white text-sm"
+          onClick={() => file && onStartBatch?.(file)}
+          title={!file ? 'Select an audio file first' : 'Run 24 combos × 5 repeats'}
+        >Auto Run 24×5</button>
         <button className="px-3 py-2 rounded-md bg-gray-100 text-gray-800 text-sm" onClick={save}>Save Preset</button>
         <button className="px-3 py-2 rounded-md bg-gray-100 text-gray-800 text-sm" onClick={load}>Load Preset</button>
       </div>

@@ -6,9 +6,10 @@ type Props = {
   scenario: Scenario | null;
   kpiStatus: "pass" | "warn" | "fail";
   kpiText: string;
+  progressText?: string;
 };
 
-export default function HeaderKpiBar({ scenario, kpiStatus, kpiText }: Props) {
+export default function HeaderKpiBar({ scenario, kpiStatus, kpiText, progressText }: Props) {
   const badgeColor = kpiStatus === "pass" ? "bg-green-100 text-green-700" : kpiStatus === "warn" ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700";
   return (
     <div className="flex items-center justify-between border-b px-4 py-3">
@@ -22,7 +23,12 @@ export default function HeaderKpiBar({ scenario, kpiStatus, kpiText }: Props) {
           <span className="text-gray-400">—</span>
         )}
       </div>
-      <div className={`px-2 py-1 rounded text-sm font-medium ${badgeColor}`}>{kpiText}</div>
+      <div className="flex items-center gap-2">
+        {progressText && (
+          <span className="px-2 py-1 rounded bg-blue-50 text-blue-700 text-sm whitespace-nowrap">{progressText}</span>
+        )}
+        <div className={`px-2 py-1 rounded text-sm font-medium ${badgeColor}`}>{kpiText}</div>
+      </div>
     </div>
   );
 }
