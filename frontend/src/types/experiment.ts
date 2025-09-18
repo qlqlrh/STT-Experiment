@@ -40,5 +40,7 @@ export type Run = {
   metrics: Metrics;
   status: "pass" | "warn" | "fail";
   segments: Segment[];
+  kpiMetrics?: import("@/utils/metrics").KpiMetrics;
+  kpiResult?: import("@/utils/metrics").KpiResult;
 };
 

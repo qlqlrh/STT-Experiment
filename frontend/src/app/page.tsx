@@ -11,6 +11,7 @@ import LogsPane from "@/components/dashboard/LogsPane";
 import { Metrics, Run, Scenario, Segment } from "@/types/experiment";
 import { mean, p95, std } from "@/utils/stats";
 import { runExperiment } from "@/lib/experiment";
+import { evaluateKpi, type KpiMetrics, type KpiResult } from "@/utils/metrics";
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState("Live");
@@ -20,6 +21,9 @@ export default function Home() {
   const [runs, setRuns] = useState<Run[]>([]);
   const [selectedRunIds, setSelectedRunIds] = useState<string[]>([]);
   const [logFilter, setLogFilter] = useState<"all"|"failed"|"dropped">("all");
+  const [audioDurationMs, setAudioDurationMs] = useState<number | null>(null);
+  const [lastKpiMetrics, setLastKpiMetrics] = useState<KpiMetrics | null>(null);
+  const [lastKpiResult, setLastKpiResult] = useState<KpiResult | null>(null);
 
   const metrics = useMemo<Metrics>(() => {
     const e2eArr = recent.map((s) => s.e2e);
@@ -35,18 +39,54 @@ export default function Home() {
     };
   }, [recent]);
 
-  const kpiText = useMemo(() => {
-    if (metrics.n === 0) return "—";
-    const ok = metrics.e2e.mean <= 1500 && metrics.e2e.p95 <= 2500;
-    return ok ? "KPI PASS" : metrics.e2e.p95 <= 3000 ? "KPI WARN" : "KPI FAIL";
-  }, [metrics]);
-  const kpiStatus: "pass"|"warn"|"fail" = kpiText.includes("PASS") ? "pass" : kpiText.includes("WARN") ? "warn" : "fail";
+  const { kpiMetrics, kpiResult } = useMemo((): { kpiMetrics: KpiMetrics | null; kpiResult: KpiResult | null } => {
+    if (!audioDurationMs || recent.length === 0) return { kpiMetrics: null, kpiResult: null };
+    const dur = audioDurationMs;
+    const aslEach = recent.map((s) => (s.e2e ?? 0) - dur);
+    const aslPercentEach = recent.map((s) => (((s.e2e ?? 0) - dur) / Math.max(1, dur)) * 100);
+    const rtfEach = recent.map((s) => (s.e2e ?? 0) / Math.max(1, dur));
+    const ttftEach = recent.map((s) => ((s.t2 ?? 0) - (s.t1 ?? 0)) + (s.tx ?? 0));
 
-  function onStart(s: Scenario, file: File) {
+    const k: KpiMetrics = {
+      asl: { mean: mean(aslEach) / 1000, p95: p95(aslEach) / 1000 }, // to seconds
+      aslPercent: { mean: mean(aslPercentEach), p95: p95(aslPercentEach) },
+      rtf: { mean: mean(rtfEach), p95: p95(rtfEach) },
+      ttft: { p95: p95(ttftEach) / 1000 }, // to seconds
+    };
+    return { kpiMetrics: k, kpiResult: evaluateKpi(k) };
+  }, [audioDurationMs, recent]);
+
+  // Live에서 계산된 최신 KPI 스냅샷 보관 (Run 저장 시 그대로 사용)
+  React.useEffect(() => {
+    if (kpiMetrics && kpiResult) {
+      setLastKpiMetrics(kpiMetrics);
+      setLastKpiResult(kpiResult);
+    }
+  }, [kpiMetrics, kpiResult]);
+
+  const { kpiText, kpiStatus } = useMemo(() => {
+    if (!kpiResult) return { kpiText: "—", kpiStatus: "fail" as const };
+    const overall = kpiResult.overall;
+    const badge = overall.toUpperCase();
+    return { kpiText: `${badge} · 종합 KPI`, kpiStatus: overall === "PASS" ? ("pass" as const) : overall === "WARN" ? ("warn" as const) : ("fail" as const) };
+  }, [kpiResult]);
+
+  async function onStart(s: Scenario, file: File) {
     setScenario(s);
     setActiveTab("Live");
     setCurrent(null);
     setRecent([]);
+    // 오디오 길이(ms) 계산 (가변 길이 보정용)
+    try {
+      const ab = await file.arrayBuffer();
+      const AudioCtor = (window as any).AudioContext || (window as any).webkitAudioContext;
+      const ctx = new AudioCtor();
+      const buf = await ctx.decodeAudioData(ab.slice(0));
+      setAudioDurationMs((buf.duration || 0) * 1000);
+      ctx.close?.();
+    } catch {
+      setAudioDurationMs(null);
+    }
 
     const segmentId = "seg-" + Math.random().toString(36).slice(2, 8);
     runExperiment(
@@ -63,7 +103,7 @@ export default function Home() {
       },
       file,
       {
-        onSegmentUpdate: (seg) => {
+        onSegmentUpdate: (seg: any) => {
           setCurrent((prev) => ({
             id: segmentId,
             t1: seg.t1 ?? prev?.t1 ?? 0,
@@ -89,12 +129,12 @@ export default function Home() {
                 id: segmentId,
                 e2e: seg.e2e!,
                 stt: seg.stt ?? 0,
-                tx: seg.tx ?? 0,
+                tx: seg.tx ?? (current as any)?.tx ?? 0,
                 ui: seg.ui ?? 0,
                 t1: seg.t1!,
-                t2: seg.t2 ?? seg.t1!,
-                t3: seg.t3 ?? seg.t2 ?? seg.t1!,
-                t4: seg.t4 ?? seg.t3 ?? seg.t2 ?? seg.t1!,
+                t2: seg.t2 ?? (current as any)?.t2 ?? seg.t1!,
+                t3: seg.t3 ?? (current as any)?.t3 ?? seg.t2 ?? seg.t1!,
+                t4: seg.t4 ?? (current as any)?.t4 ?? seg.t3 ?? seg.t2 ?? seg.t1!,
                 t5: seg.t5!,
                 t1Epoch: seg.t1Epoch ?? (current as any)?.t1Epoch,
                 t2Epoch: seg.t2Epoch ?? (current as any)?.t2Epoch,
@@ -106,7 +146,28 @@ export default function Home() {
             ].slice(0, 200));
           }
         },
-        onCompleted: () => {},
+        onCompleted: () => {
+          // 실험 1회 종료 시, Live에서 계산된 KPI 스냅샷을 그대로 저장
+          if (!scenario) return;
+          const runId = `${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
+          const res = lastKpiResult ?? undefined;
+          const status = res ? (res.overall === 'PASS' ? 'pass' : res.overall === 'WARN' ? 'warn' : 'fail') : 'fail';
+          const dropRate = ((): number | undefined => {
+            // 추후 서버에서 드롭 통계가 오면 교체. 지금은 없으면 0으로 저장
+            return 0;
+          })();
+          const run: Run = {
+            id: runId,
+            startedAt: Date.now(),
+            scenario,
+            metrics: { ...metrics, dropRate },
+            status,
+            segments: recent,
+            kpiMetrics: lastKpiMetrics ?? undefined,
+            kpiResult: res,
+          };
+          setRuns((prev) => [run, ...prev]);
+        },
         onError: (e) => {
           console.error(e);
         },
@@ -132,8 +193,8 @@ export default function Home() {
       <main className="flex flex-col min-w-0">
         <HeaderKpiBar scenario={scenario!} kpiStatus={kpiStatus} kpiText={kpiText} />
         <Tabs tabs={["Live","Summary","Distributions","Runs","Logs"]} active={activeTab} onChange={setActiveTab}>
-          {activeTab === "Live" && <LivePane current={current} recent={recent} />}
-          {activeTab === "Summary" && scenario && <SummaryPane scenario={scenario} metrics={metrics} />}
+          {activeTab === "Live" && <LivePane current={current} recent={recent} kpiMetrics={kpiMetrics ?? undefined} kpiResult={kpiResult ?? undefined} />}
+          {activeTab === "Summary" && scenario && <SummaryPane scenario={scenario} metrics={metrics} kpiMetrics={kpiMetrics ?? undefined} kpiResult={kpiResult ?? undefined} />}
           {activeTab === "Distributions" && <DistributionsPane runs={runs} selectedRunIds={selectedRunIds} onToggleRun={onToggleRun} />}
           {activeTab === "Runs" && <RunsPane runs={runs} onOpenSegment={onOpenSegment} onExportCsv={onExportCsv} />}
           {activeTab === "Logs" && <LogsPane segments={recent} filter={logFilter} onFilter={setLogFilter} />}
