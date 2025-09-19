@@ -174,28 +174,24 @@ export async function runExperiment(
           dropRate: typeof msg.drop_rate === 'number' ? msg.drop_rate : undefined,
         });
         
-        // After the UI applies the transcript, capture T5 and compute E2E/UI/TTFT
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            if ((seg as any).completed) return;
-            seg.t5c = performance.now(); // T5c: UI 반영 완료 직후
-            const e2e = seg.t1c && seg.t5c ? seg.t5c - seg.t1c : undefined;
-            const ui = seg.t4f_c && seg.t5c ? seg.t5c - seg.t4f_c : undefined;
-            const ttft = seg.firstResult_c ? seg.firstResult_c - seg.t1c : undefined;
-            (seg as any).completed = true;
-            cb.onSegmentUpdate({
-              id: seg.id,
-              t1: seg.t1c!,
-              t4: seg.t4f_c,
-              t5: seg.t5c,
-              e2e,
-              ui,
-              t5Epoch: Date.now(),
-              dropRate: typeof msg.drop_rate === 'number' ? msg.drop_rate : undefined,
-            });
-            cb.onCompleted();
+        // T4 수신 즉시 동기적으로 T5를 근사 계산하여 Run 저장을 트리거
+        if (!(seg as any).completed) {
+          seg.t5c = performance.now();
+          const e2e = seg.t1c && seg.t5c ? seg.t5c - seg.t1c : undefined;
+          const ui = seg.t4f_c && seg.t5c ? seg.t5c - seg.t4f_c : undefined;
+          (seg as any).completed = true;
+          cb.onSegmentUpdate({
+            id: seg.id,
+            t1: seg.t1c!,
+            t4: seg.t4f_c,
+            t5: seg.t5c,
+            e2e,
+            ui,
+            t5Epoch: Date.now(),
+            dropRate: typeof msg.drop_rate === 'number' ? msg.drop_rate : undefined,
           });
-        });
+          cb.onCompleted();
+        }
       }
     } catch {}
   };

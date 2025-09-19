@@ -49,17 +49,44 @@ npm run dev
 
 Display-only KST epoch is shown in Live (Asia/Seoul). It uses client `Date.now()` and backend `server_epoch_ms` added to `SVR_T3`/`SVR_T4_FINAL`.
 
-### Metrics (ms)
-- E2E = T5 − T1  (end-to-end user-perceived latency)
-- STT = T4 − T3  (engine/service processing time)
-- Tx = T3_client_arrival − T2  (transport/queuing on client)
-- UI = T5 − T4_client_arrival  (render/apply time)
+### Metrics
+- E2E (ms) = T5 − T1  (end-to-end, user-perceived latency)
+- STT (ms) = T4 − T3  (engine/service processing time; informational)
+- Tx (ms) = T3_client_arrival − T2  (transport/queuing on client; informational)
+- UI (ms) = T5 − T4_client_arrival  (render/apply time; informational)
+- D (ms) = input audio duration
+
+- ASL (Added System Latency, seconds):
+  - ASL = max(0, E2E − D) / 1000
+  - Rationale: subtracts inherent speaking time to isolate system-induced overhead; clamps negatives to 0.
+
+- ASL% (Added System Latency Percentage, %):
+  - ASL% = (max(0, E2E − D) / max(1, D)) × 100
+  - Rationale: normalizes by utterance length to compare across varying durations.
+
+Aggregation: per scenario, compute mean and p95 over M repeated trials.
 
 All metrics are computed as monotonic differences within the same clock domain. Absolute clocks (KST) are for display only.
 
-### KPI (defaults)
-- PASS when mean(E2E) ≤ 1500 ms and P95(E2E) ≤ 2500 ms
-- WARN when within ~20% of thresholds; otherwise FAIL
+### Why ASL and ASL%?
+- Variable-length robustness: Different audio files (and user utterances) have different durations D. Using E2E alone unfairly penalizes longer inputs. Subtracting D isolates system overhead.
+- Fair cross-scenario comparison: ASL% scales ASL by D, enabling apples-to-apples comparison across files, languages, and pacing modes.
+- Real-time suitability: ASL% ≤ 100% implies processing keeps up with speaking time (RTF ≤ 1) on average.
+- Stability and sanity: Negative (E2E − D) from timestamp jitter is clamped to 0 to avoid spurious gains.
+
+### KPI (code-defined)
+- ASL
+  - PASS: mean ≤ 1.0 s AND p95 ≤ 2.0 s
+  - WARN: mean ≤ 2.0 s OR p95 ≤ 3.0 s
+  - FAIL: otherwise
+- ASL%
+  - PASS: mean ≤ 20% AND p95 ≤ 40%
+  - WARN: mean ≤ 40% OR p95 ≤ 60%
+  - FAIL: otherwise
+- Overall
+  - PASS if both metrics PASS
+  - WARN if exactly one is WARN (and none FAIL)
+  - FAIL otherwise
 
 ### Tabs (right side)
 - Live: current segment timeline (T1~T5), live metrics, recent E2E sparkline

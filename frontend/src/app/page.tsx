@@ -14,20 +14,15 @@ import { runExperiment } from "@/lib/experiment";
 import { evaluateKpi, type KpiMetrics, type KpiResult } from "@/utils/metrics";
 
 export default function Home() {
-  function computeKpiFromSegment(durationMs: number, seg: { e2e: number; t1?: number; t4?: number; stt?: number }): { kpiMetrics: KpiMetrics; kpiResult: KpiResult } {
+  function computeKpiFromSegment(durationMs: number, seg: { e2e: number }): { kpiMetrics: KpiMetrics; kpiResult: KpiResult } {
     const dur = durationMs;
     const e2eMs = seg.e2e;
     const aslMs = Math.max(0, e2eMs - dur);
     const asl = aslMs / 1000;
     const aslPercent = (aslMs / Math.max(1, dur)) * 100;
-    const rtfVal = seg.stt ? seg.stt / Math.max(1, dur) : 0;
-    const ttftMs = (seg.t4 ?? 0) - (seg.t1 ?? 0);
-    const ttftVal = Math.max(0, ttftMs) / 1000;
     const k: KpiMetrics = {
       asl: { mean: asl, p95: asl },
       aslPercent: { mean: aslPercent, p95: aslPercent },
-      rtf: { mean: rtfVal, p95: rtfVal },
-      ttft: { p95: Number.isFinite(ttftVal) ? ttftVal : 0 },
     };
     return { kpiMetrics: k, kpiResult: evaluateKpi(k) };
   }
@@ -37,7 +32,7 @@ export default function Home() {
   const [recent, setRecent] = useState<Segment[]>([]);
   const [runs, setRuns] = useState<Run[]>([]);
   const [selectedRunIds, setSelectedRunIds] = useState<string[]>([]);
-  const [logFilter, setLogFilter] = useState<"all"|"failed"|"dropped">("all");
+  const [logFilter, setLogFilter] = useState<"all">("all");
   const [audioDurationMs, setAudioDurationMs] = useState<number | null>(null);
   const [lastKpiMetrics, setLastKpiMetrics] = useState<KpiMetrics | null>(null);
   const [lastKpiResult, setLastKpiResult] = useState<KpiResult | null>(null);
@@ -65,7 +60,7 @@ export default function Home() {
     if (!audioDurationMs) return { kpiMetrics: null, kpiResult: null };
     const seg = recent[0] || current;
     if (!seg || typeof seg.e2e !== 'number') return { kpiMetrics: null, kpiResult: null };
-    return computeKpiFromSegment(audioDurationMs, { e2e: seg.e2e, t1: seg.t1, t4: seg.t4, stt: seg.stt });
+    return computeKpiFromSegment(audioDurationMs, { e2e: seg.e2e });
   }, [audioDurationMs, recent, current]);
 
   React.useEffect(() => {
@@ -166,12 +161,18 @@ export default function Home() {
             nextCurrentLocal = nc;
             return nc;
           });
-          if (seg.e2e !== undefined) {
+          if (seg.t5 !== undefined || seg.e2e !== undefined || seg.t4 !== undefined) {
             setRecent((r) => [
               {
                 ...(nextCurrentLocal ?? ({} as any)),
                 id: segmentId,
-                e2e: seg.e2e!,
+                e2e: ((): number => {
+                  if (typeof seg.e2e === 'number') return seg.e2e as number;
+                  const t1v = seg.t1 ?? (nextCurrentLocal as any)?.t1!;
+                  const t5v = (seg.t5 ?? seg.t4 ?? (nextCurrentLocal as any)?.t5 ?? (nextCurrentLocal as any)?.t4) as number;
+                  const v = Math.max(0, (t5v ?? 0) - (t1v ?? 0));
+                  return v;
+                })(),
                 stt: seg.stt ?? (nextCurrentLocal as any)?.stt ?? 0,
                 tx: seg.tx ?? (nextCurrentLocal as any)?.tx ?? 0,
                 ui: seg.ui ?? (nextCurrentLocal as any)?.ui ?? 0,
@@ -179,7 +180,7 @@ export default function Home() {
                 t2: seg.t2 ?? (nextCurrentLocal as any)?.t2 ?? (nextCurrentLocal as any)?.t1!,
                 t3: seg.t3 ?? (nextCurrentLocal as any)?.t3 ?? (nextCurrentLocal as any)?.t2 ?? (nextCurrentLocal as any)?.t1!,
                 t4: seg.t4 ?? (nextCurrentLocal as any)?.t4 ?? (nextCurrentLocal as any)?.t3 ?? (nextCurrentLocal as any)?.t2 ?? (nextCurrentLocal as any)?.t1!,
-                t5: seg.t5!,
+                t5: (seg.t5 ?? seg.t4 ?? (nextCurrentLocal as any)?.t5 ?? (nextCurrentLocal as any)?.t4)!,
                 droppedFrames: seg.dropRate !== undefined ? Math.round((seg.dropRate || 0) * 1000) : (nextCurrentLocal as any)?.droppedFrames,
                 t1Epoch: seg.t1Epoch ?? (nextCurrentLocal as any)?.t1Epoch,
                 t2Epoch: seg.t2Epoch ?? (nextCurrentLocal as any)?.t2Epoch,
@@ -194,7 +195,13 @@ export default function Home() {
             if (!savedRunIdsRef.current.has(segmentId)) {
               const segForRun = {
                 id: segmentId,
-                e2e: seg.e2e!,
+                e2e: ((): number => {
+                  if (typeof seg.e2e === 'number') return seg.e2e as number;
+                  const t1v = seg.t1 ?? (nextCurrentLocal as any)?.t1!;
+                  const t5v = (seg.t5 ?? seg.t4 ?? (nextCurrentLocal as any)?.t5 ?? (nextCurrentLocal as any)?.t4) as number;
+                  const v = Math.max(0, (t5v ?? 0) - (t1v ?? 0));
+                  return v;
+                })(),
                 stt: seg.stt ?? (nextCurrentLocal as any)?.stt ?? 0,
                 tx: seg.tx ?? (nextCurrentLocal as any)?.tx ?? 0,
                 ui: seg.ui ?? (nextCurrentLocal as any)?.ui ?? 0,
@@ -202,7 +209,7 @@ export default function Home() {
                 t2: seg.t2 ?? (nextCurrentLocal as any)?.t2 ?? (nextCurrentLocal as any)?.t1!,
                 t3: seg.t3 ?? (nextCurrentLocal as any)?.t3 ?? (nextCurrentLocal as any)?.t2 ?? (nextCurrentLocal as any)?.t1!,
                 t4: seg.t4 ?? (nextCurrentLocal as any)?.t4 ?? (nextCurrentLocal as any)?.t3 ?? (nextCurrentLocal as any)?.t2 ?? (nextCurrentLocal as any)?.t1!,
-                t5: seg.t5!,
+                t5: (seg.t5 ?? seg.t4 ?? (nextCurrentLocal as any)?.t5 ?? (nextCurrentLocal as any)?.t4)!,
               } as Segment;
 
               const singleMetrics: Metrics = {
@@ -219,7 +226,7 @@ export default function Home() {
               let kpiR: KpiResult | undefined = undefined;
               const dur = typeof durationMsLocal === 'number' && durationMsLocal > 0 ? durationMsLocal : (typeof audioDurationMs === 'number' ? audioDurationMs : null);
               if (typeof dur === 'number' && dur > 0) {
-                const computed = computeKpiFromSegment(dur, { e2e: segForRun.e2e, t1: segForRun.t1, t4: segForRun.t4, stt: segForRun.stt });
+                const computed = computeKpiFromSegment(dur, { e2e: segForRun.e2e });
                 kpiM = computed.kpiMetrics;
                 kpiR = computed.kpiResult;
                 status = kpiR.overall === 'PASS' ? 'pass' : kpiR.overall === 'WARN' ? 'warn' : 'fail';
@@ -285,20 +292,20 @@ export default function Home() {
           defaultScenario={{}}
           onStart={onStart}
           onStartBatch={(file) => {
-            const base = { win: 2.0, hop: 0.5, lang: "ko-KR", filename: file.name } as const;
+            const base = { hop: 0.5, lang: "ko-KR", filename: file.name } as const;
             const frames = [2048, 4096, 8192] as const;
             const buffers = [
               { buffer: "unbounded" as const, capacity: 0 },
               { buffer: "bounded_drop_newest" as const, capacity: 16 },
             ];
             const threads = [1, 2] as const;
-            const paces = ["realtime", "fast"] as const;
+            const wins = [1.0, 2.0] as const;
             const combos: Scenario[] = [] as any;
             for (const frame of frames)
             for (const b of buffers)
             for (const th of threads)
-            for (const pace of paces) {
-              combos.push({ ...base, frame, threads: th, buffer: b.buffer, capacity: b.capacity, pace } as any);
+            for (const win of wins) {
+              combos.push({ ...base, frame, threads: th, buffer: b.buffer, capacity: b.capacity, win, hop: base.hop, pace: "realtime" } as any);
             }
             runBatch(combos, 5, file);
           }}

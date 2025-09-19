@@ -1,7 +1,7 @@
 "use client";
 import React from "react";
 import { Segment } from "@/types/experiment";
-import { TIMESTAMP_DESCRIPTIONS, METRIC_DESCRIPTIONS, SHORT_TIPS } from "@/constants/descriptions";
+import { TIMESTAMP_DESCRIPTIONS } from "@/constants/descriptions";
 import { DESCRIPTIONS, type KpiMetrics, type KpiResult } from "@/utils/metrics";
 
 type Props = { current: Segment | null; recent: Segment[]; kpiMetrics?: KpiMetrics; kpiResult?: KpiResult };
@@ -28,23 +28,13 @@ export default function LivePane({ current, recent, kpiMetrics, kpiResult }: Pro
         <div className="mt-2 text-xs text-gray-500">
           {formatKstRow(current)}
         </div>
-        <div className="mt-3 grid grid-cols-4 gap-2 tabular text-sm">
-          <Metric label="E2E" value={current?.e2e} />
-          <Metric label="STT" value={current?.stt} />
-          <Metric label="Tx" value={current?.tx} />
-          <Metric label="UI" value={current?.ui} />
-        </div>
         <div className="mt-3 rounded-md bg-indigo-50 border border-indigo-100 p-3 text-[13px] leading-5 text-indigo-900">
-          <div className="font-medium mb-1">지표 해설</div>
-          <p>이 실험은 오디오를 조각내 WebSocket으로 전송하고 서버 STT 처리 후 결과를 받는 여정을 측정합니다.</p>
+          <div className="font-medium mb-1">타임라인</div>
           <ul className="list-disc pl-5 mt-1 space-y-0.5">
             {(["T1","T2","T3","T4","T5"] as const).map((k) => (
               <li key={k}><b>{TIMESTAMP_DESCRIPTIONS[k].title}</b> — {TIMESTAMP_DESCRIPTIONS[k].desc}</li>
             ))}
           </ul>
-          <p className="mt-2">
-            핵심 지표는 <b>{METRIC_DESCRIPTIONS.e2e.title}</b>({METRIC_DESCRIPTIONS.e2e.formula}), <b>{METRIC_DESCRIPTIONS.sttProc.title}</b>({METRIC_DESCRIPTIONS.sttProc.formula}), <b>{METRIC_DESCRIPTIONS.txPipe.title}</b>({METRIC_DESCRIPTIONS.txPipe.formula}), <b>{METRIC_DESCRIPTIONS.uiApply.title}</b>({METRIC_DESCRIPTIONS.uiApply.formula})로 계산됩니다.
-          </p>
         </div>
         {current?.transcript && (
           <div className="mt-3 text-sm text-gray-700 line-clamp-2">{current.transcript}</div>
@@ -56,11 +46,9 @@ export default function LivePane({ current, recent, kpiMetrics, kpiResult }: Pro
             <div className="font-medium">KPI 종합 결과</div>
             <span className={`px-2 py-0.5 rounded text-xs ${kpiResult.overall === 'PASS' ? 'bg-green-100 text-green-700' : kpiResult.overall === 'WARN' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>{kpiResult.overall}</span>
           </div>
-          <div className="grid md:grid-cols-4 gap-3 text-sm">
+          <div className="grid md:grid-cols-2 gap-3 text-sm">
             <LiveMetricBadge title="ASL" desc={DESCRIPTIONS.asl} level={kpiResult.asl} main={`${kpiMetrics.asl.mean.toFixed(2)}s`} />
             <LiveMetricBadge title="ASL%" desc={DESCRIPTIONS.aslPercent} level={kpiResult.aslPercent} main={`${kpiMetrics.aslPercent.mean.toFixed(1)}%`} />
-            <LiveMetricBadge title="RTF" desc={DESCRIPTIONS.rtf} level={kpiResult.rtf} main={`${kpiMetrics.rtf.mean.toFixed(2)}`} />
-            <LiveMetricBadge title="TTFT" desc={DESCRIPTIONS.ttft} level={kpiResult.ttft} main={`${kpiMetrics.ttft.p95.toFixed(2)}s`} />
           </div>
         </div>
       )}
